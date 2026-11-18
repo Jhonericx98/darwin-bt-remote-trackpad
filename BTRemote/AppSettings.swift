@@ -6,6 +6,7 @@ enum AppSettings {
     static let pointerAccelerationKey = "pointerAcceleration"
     static let scrollInertiaKey = "scrollInertia"
     static let reverseHorizontalScrollKey = "reverseHorizontalScroll"
+    static let scrollAsStepsKey = "scrollAsSteps"
     static let autoAdvertiseKey = "autoAdvertise"
     static let deviceNamesKey = "deviceNames"
     static let hasSeenWelcomeKey = "hasSeenWelcome"

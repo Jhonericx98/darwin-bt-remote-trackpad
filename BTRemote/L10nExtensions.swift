@@ -186,6 +186,10 @@ extension L10n {
             "settings.reverse_horizontal_scroll"
         }
 
+        static var scrollAsSteps: LocalizedStringKey {
+            "settings.scroll_as_steps"
+        }
+
         static var connection: LocalizedStringKey {
             "settings.connection"
         }

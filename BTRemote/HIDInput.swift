@@ -13,6 +13,8 @@ struct HIDInput {
     let isConnected: Bool
     let activeError: String?
     let batteryLevel: UInt8
+    /// input reports still waiting for the Bluetooth stack (0 when unknown)
+    var backlog: () -> Int = { 0 }
 
     func sendMouse(_ report: MouseReport) {
         send(ReportID.mouse.rawValue, report.data)
@@ -115,7 +117,8 @@ extension HIDInput {
             isActive: lowEnergy.isHIDServiceAdded,
             isConnected: lowEnergy.connectedCentrals.contains { !lowEnergy.inactiveCentrals.contains($0) } || !central.connected.isEmpty,
             activeError: lowEnergy.lastError ?? central.lastError,
-            batteryLevel: lowEnergy.batteryLevel
+            batteryLevel: lowEnergy.batteryLevel,
+            backlog: { lowEnergy.pendingReportCount }
         )
     }
 }

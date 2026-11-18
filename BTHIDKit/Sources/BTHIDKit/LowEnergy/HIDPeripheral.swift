@@ -48,7 +48,16 @@ public final class HIDPeripheral: NSObject, ObservableObject {
     /// replayed on reads + new subscriptions
     private var cachedReports: [UInt8: Data]
 
-    private var pendingBroadcast: (Data, CBMutableCharacteristic)?
+    /// FIFO of notifications waiting for `peripheralManagerIsReady`; a single slot
+    /// used to drop every report but the last one when the queue was full
+    private var pendingBroadcasts: [(Data, CBMutableCharacteristic)] = []
+    /// safety bound only; the trackpad paces itself with `pendingReportCount`
+    private static let maxPendingBroadcasts = 256
+
+    /// notifications not yet accepted by CoreBluetooth
+    public var pendingReportCount: Int {
+        pendingBroadcasts.count
+    }
 
     public init(profile: any HIDProfile) {
         self.profile = profile
@@ -93,7 +102,7 @@ public final class HIDPeripheral: NSObject, ObservableObject {
         isAdvertising = false
         isHIDServiceAdded = false
         isReadyToSendNotification = true
-        pendingBroadcast = nil
+        pendingBroadcasts.removeAll()
         batteryServiceObj = nil
         deviceInfoServiceObj = nil
         hidServiceObj = nil
@@ -342,32 +351,32 @@ public final class HIDPeripheral: NSObject, ObservableObject {
         _ = updateValue(data, for: char)
     }
 
+    /// queues the notification and sends everything CoreBluetooth accepts, in order
     @discardableResult
     private func updateValue(_ data: Data, for char: CBMutableCharacteristic) -> Bool {
-        guard let pManager else { return false }
-        let recipients = activeRecipients()
-        guard !recipients.isEmpty else { return false }
-        if !isReadyToSendNotification {
-            pendingBroadcast = (data, char)
-            return false
+        guard pManager != nil, !activeRecipients().isEmpty else { return false }
+        pendingBroadcasts.append((data, char))
+        if pendingBroadcasts.count > Self.maxPendingBroadcasts {
+            pendingBroadcasts.removeFirst(pendingBroadcasts.count - Self.maxPendingBroadcasts)
         }
-        let accepted = pManager.updateValue(data, for: char, onSubscribedCentrals: recipients)
-        if !accepted {
-            isReadyToSendNotification = false
-            pendingBroadcast = (data, char)
-        }
-        return accepted
+        guard isReadyToSendNotification else { return false }
+        drainPendingBroadcast()
+        return pendingBroadcasts.isEmpty
     }
 
     private func drainPendingBroadcast() {
-        guard let (data, char) = pendingBroadcast, let pManager else { return }
-        pendingBroadcast = nil
+        guard let pManager else { return }
         let recipients = activeRecipients()
-        guard !recipients.isEmpty else { return }
-        let accepted = pManager.updateValue(data, for: char, onSubscribedCentrals: recipients)
-        if !accepted {
-            isReadyToSendNotification = false
-            pendingBroadcast = (data, char)
+        guard !recipients.isEmpty else {
+            pendingBroadcasts.removeAll()
+            return
+        }
+        while let (data, char) = pendingBroadcasts.first {
+            guard pManager.updateValue(data, for: char, onSubscribedCentrals: recipients) else {
+                isReadyToSendNotification = false
+                return
+            }
+            pendingBroadcasts.removeFirst()
         }
     }
 
@@ -460,6 +469,8 @@ extension HIDPeripheral: @preconcurrency CBPeripheralManagerDelegate {
         didSubscribeTo characteristic: CBCharacteristic
     ) {
         _trackInteraction(from: central)
+        // shortest connection interval the host allows: more input reports per second
+        peripheral.setDesiredConnectionLatency(.low, for: central)
         subscribedCentrals[central.identifier, default: []].insert(characteristic.uuid)
         _trace("subscribe: \(central.identifier) -> \(characteristic.uuid)")
         let boot = identity.boot

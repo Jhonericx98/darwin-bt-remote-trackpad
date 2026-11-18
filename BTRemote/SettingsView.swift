@@ -12,6 +12,7 @@ struct SettingsView: View {
         @AppStorage(AppSettings.pointerAccelerationKey) private var pointerAcceleration = true
         @AppStorage(AppSettings.scrollInertiaKey) private var scrollInertia = true
         @AppStorage(AppSettings.reverseHorizontalScrollKey) private var reverseHorizontalScroll = false
+        @AppStorage(AppSettings.scrollAsStepsKey) private var scrollAsSteps = true
     #endif
     @AppStorage(HIDSettings.developerModeKey) private var developerMode = false
     @AppStorage(HIDSettings.forceServiceChangedKey) private var forceServiceChanged = true
@@ -44,6 +45,7 @@ struct SettingsView: View {
                     Toggle(L10n.Settings.pointerAcceleration, isOn: $pointerAcceleration)
                     Toggle(L10n.Settings.scrollInertia, isOn: $scrollInertia)
                     Toggle(L10n.Settings.reverseHorizontalScroll, isOn: $reverseHorizontalScroll)
+                    Toggle(L10n.Settings.scrollAsSteps, isOn: $scrollAsSteps)
                 #endif
             }
             #if os(iOS)

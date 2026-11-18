@@ -9,6 +9,7 @@ struct TrackpadPanel: View {
         @AppStorage(AppSettings.pointerAccelerationKey) private var pointerAcceleration = true
         @AppStorage(AppSettings.scrollInertiaKey) private var scrollInertia = true
         @AppStorage(AppSettings.reverseHorizontalScrollKey) private var reverseHorizontalScroll = false
+        @AppStorage(AppSettings.scrollAsStepsKey) private var scrollAsSteps = true
         @StateObject private var engine = TouchpadEngine()
     #endif
     #if os(macOS)
@@ -37,7 +38,9 @@ struct TrackpadPanel: View {
                     pointerAcceleration: pointerAcceleration,
                     scrollInertia: scrollInertia,
                     reverseHorizontalScroll: reverseHorizontalScroll,
+                    scrollAsSteps: scrollAsSteps,
                     onReport: { hid.sendMouse($0) },
+                    backlog: { hid.backlog() },
                     onLeftClick: { Haptics.tap(); engine.click(.left) },
                     onRightClick: { Haptics.tap(); engine.click(.right) }
                 )

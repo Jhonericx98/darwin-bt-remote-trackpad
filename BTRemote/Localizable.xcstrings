@@ -1431,6 +1431,17 @@
         }
       }
     },
+    "settings.scroll_as_steps": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fast scroll for iPad (one step per report)"
+          }
+        }
+      }
+    },
     "settings.source_code": {
       "extractionState": "manual",
       "localizations": {

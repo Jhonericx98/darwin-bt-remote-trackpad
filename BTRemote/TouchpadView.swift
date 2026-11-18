@@ -20,7 +20,9 @@
         var pointerAcceleration: Bool
         var scrollInertia: Bool
         var reverseHorizontalScroll: Bool
+        var scrollAsSteps: Bool
         var onReport: (MouseReport) -> Void
+        var backlog: () -> Int
         var onLeftClick: () -> Void
         var onRightClick: () -> Void
 
@@ -58,6 +60,8 @@
             let c = context.coordinator
             c.engine = engine
             engine.output = onReport
+            engine.backlog = backlog
+            engine.scrollAsSteps = scrollAsSteps
             c.moveSensitivity = moveSensitivity
             c.scrollSensitivity = scrollSensitivity
             c.pointerAcceleration = pointerAcceleration
@@ -264,12 +268,19 @@
         }
     }
 
-    /// Paces trackpad output: fractional motion is carried between frames, at most one
-    /// mouse report is sent per display frame (≤ 60 Hz), and held buttons are kept in
+    /// Paces trackpad output: fractional motion is carried between frames, pointer motion
+    /// is sent at most once per display frame (≤ 60 Hz), and held buttons are kept in
     /// every report so dragging with a held button works.
+    ///
+    /// iPadOS counts every wheel report as one step whatever its value, so with
+    /// `scrollAsSteps` each tick goes out as its own ±1 report, paced by the Bluetooth
+    /// backlog so the queue never runs ahead of the finger.
     @MainActor
     final class TouchpadEngine: ObservableObject {
         var output: (MouseReport) -> Void = { _ in }
+        /// reports still queued in the Bluetooth stack
+        var backlog: () -> Int = { 0 }
+        var scrollAsSteps = true
 
         private var heldButtons: MouseButtons = []
         private var clickButton: MouseButtons = []
@@ -294,6 +305,10 @@
         private static let friction: CGFloat = 0.95
         private static let minMomentum: CGFloat = 4
         private static let maxMomentum: CGFloat = 240
+        /// step reports per frame at most (360/s at 60 Hz)
+        private static let maxStepsPerFrame = 6
+        /// new steps are only queued while fewer reports than this are waiting
+        private static let targetBacklog = 6
 
         func touchBegan() {
             isTouching = true
@@ -390,7 +405,8 @@
                 needsRestReport = false
             }
 
-            if !isTouching, momentum == .zero, clickButton.isEmpty, !needsRestReport {
+            let scrollDrained = abs(pendingScroll.dx) < 1 && abs(pendingScroll.dy) < 1
+            if !isTouching, momentum == .zero, clickButton.isEmpty, !needsRestReport, scrollDrained {
                 pendingPointer = .zero
                 pendingScroll = .zero
                 link.isPaused = true
@@ -413,13 +429,41 @@
         private func emit(force: Bool) {
             let dx = Self.take(&pendingPointer.dx)
             let dy = Self.take(&pendingPointer.dy)
-            let wheel = Self.take(&pendingScroll.dy)
-            let pan = Self.take(&pendingScroll.dx)
-            let hasMotion = dx != 0 || dy != 0 || wheel != 0 || pan != 0
-            guard force || hasMotion else { return }
-            output(MouseReport(buttons: heldButtons.union(clickButton), dX: dx, dY: dy, wheel: wheel, pan: pan))
-            lastReportAt = CACurrentMediaTime()
-            if hasMotion { needsRestReport = true }
+            let wheels: [Int8]
+            let pans: [Int8]
+            if scrollAsSteps {
+                let budget = max(0, min(Self.maxStepsPerFrame, Self.targetBacklog - backlog()))
+                wheels = Self.takeSteps(&pendingScroll.dy, budget: budget)
+                pans = Self.takeSteps(&pendingScroll.dx, budget: budget)
+            } else {
+                wheels = [Self.take(&pendingScroll.dy)]
+                pans = [Self.take(&pendingScroll.dx)]
+            }
+            let buttons = heldButtons.union(clickButton)
+            for i in 0 ..< max(wheels.count, pans.count, 1) {
+                let report = MouseReport(
+                    buttons: buttons,
+                    dX: i == 0 ? dx : 0,
+                    dY: i == 0 ? dy : 0,
+                    wheel: i < wheels.count ? wheels[i] : 0,
+                    pan: i < pans.count ? pans[i] : 0
+                )
+                let hasMotion = report.dX != 0 || report.dY != 0 || report.wheel != 0 || report.pan != 0
+                guard force || hasMotion else { continue }
+                output(report)
+                lastReportAt = CACurrentMediaTime()
+                if hasMotion { needsRestReport = true }
+            }
+        }
+
+        /// one ±1 step per whole tick, at most `budget`; a backlog beyond a few frames is dropped
+        private static func takeSteps(_ value: inout CGFloat, budget: Int) -> [Int8] {
+            let sign: CGFloat = value < 0 ? -1 : 1
+            let count = min(budget, Int(abs(value)))
+            value -= sign * CGFloat(count)
+            let cap = CGFloat(maxStepsPerFrame * 3)
+            value = max(-cap, min(cap, value))
+            return Array(repeating: Int8(sign), count: count)
         }
 
         /// whole part (clamped to the report range); the remainder stays for the next frame
