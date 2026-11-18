@@ -82,11 +82,8 @@
             var onLeftClick: () -> Void = {}
             var onRightClick: () -> Void = {}
 
-            private enum Mode { case idle, pointer, scroll, settling }
-            private enum Axis { case undecided, vertical, horizontal, free }
-
-            private var mode = Mode.idle
-            private var axis = Axis.undecided
+            private var mode = TouchMode.idle
+            private var axis = ScrollAxis.undecided
             private var touchCount = 0
             /// scroll travel collected before the axis is decided
             private var lockTravel = CGVector.zero
@@ -218,7 +215,7 @@
                 }
             }
 
-            private static func decideAxis(_ d: CGVector) -> Axis {
+            private static func decideAxis(_ d: CGVector) -> ScrollAxis {
                 let x = abs(d.dx)
                 let y = abs(d.dy)
                 if y >= x * axisLockRatio { return .vertical }
@@ -254,6 +251,9 @@
             }
         }
     }
+
+    private enum TouchMode { case idle, pointer, scroll, settling }
+    private enum ScrollAxis { case undecided, vertical, horizontal, free }
 
     private final class TouchSurfaceView: UIView {
         var onTouchDown: (() -> Void)?
