@@ -111,10 +111,25 @@ struct TrackpadPanel: View {
         #endif
     }
 
+    /// on iOS holding an arrow keeps scrolling (and speeds up) instead of a single step
+    private func pressScroll(_ wheel: Int8) {
+        #if os(iOS)
+            engine.startHoldScroll(direction: wheel > 0 ? 1 : -1, rate: 20 * scrollSensitivity)
+        #else
+            hid.scroll(wheel)
+        #endif
+    }
+
+    private func releaseScroll() {
+        #if os(iOS)
+            engine.stopHoldScroll()
+        #endif
+    }
+
     private func scrollButton(_ icon: String, _ label: LocalizedStringKey, _ wheel: Int8) -> some View {
         HoldButton(
-            onPress: { hid.scroll(wheel) },
-            onRelease: {},
+            onPress: { pressScroll(wheel) },
+            onRelease: { releaseScroll() },
             background: { RoundedRectangle(cornerRadius: 12).fill(groupFill) },
             label: { Image(systemName: icon).font(.body) }
         )

@@ -292,6 +292,9 @@
         /// ticks per second
         private var momentum = CGVector.zero
         private var isTouching = false
+        /// arrow-button scrolling while held, ticks per second (+ scrolls up)
+        private var holdScroll: CGFloat = 0
+        private var holdStartedAt: CFTimeInterval = 0
         private var needsRestReport = false
         private var lastReportAt: CFTimeInterval = 0
         private var lastTick: CFTimeInterval = 0
@@ -355,6 +358,19 @@
             return wasCoasting
         }
 
+        /// first step at once, then continuous scrolling that speeds up to 3× over ~1 s
+        func startHoldScroll(direction: CGFloat, rate: CGFloat) {
+            holdScroll = direction * rate
+            holdStartedAt = CACurrentMediaTime()
+            pendingScroll.dy += direction
+            run()
+        }
+
+        func stopHoldScroll() {
+            holdScroll = 0
+            run()
+        }
+
         func press(_ button: MouseButtons) {
             heldButtons.insert(button)
             emit(force: true)
@@ -391,6 +407,11 @@
                 if hypot(momentum.dx, momentum.dy) < Self.minMomentum { momentum = .zero }
             }
 
+            if holdScroll != 0 {
+                let ramp = min(3, 1 + (now - holdStartedAt) / 0.5)
+                pendingScroll.dy += holdScroll * ramp * dt
+            }
+
             if !clickButton.isEmpty, now >= clickReleaseAt {
                 clickButton = []
                 emit(force: true)
@@ -398,7 +419,7 @@
                 emit(force: false)
             }
 
-            if needsRestReport, !isTouching, momentum == .zero, now - lastReportAt >= Self.restDelay {
+            if needsRestReport, !isTouching, holdScroll == 0, momentum == .zero, now - lastReportAt >= Self.restDelay {
                 // relative axes need no zero report; this one only refreshes the
                 // peripheral's cached report so a reconnect does not replay motion
                 output(MouseReport(buttons: heldButtons))
@@ -406,7 +427,7 @@
             }
 
             let scrollDrained = abs(pendingScroll.dx) < 1 && abs(pendingScroll.dy) < 1
-            if !isTouching, momentum == .zero, clickButton.isEmpty, !needsRestReport, scrollDrained {
+            if !isTouching, holdScroll == 0, momentum == .zero, clickButton.isEmpty, !needsRestReport, scrollDrained {
                 pendingPointer = .zero
                 pendingScroll = .zero
                 link.isPaused = true
