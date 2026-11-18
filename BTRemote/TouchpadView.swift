@@ -93,8 +93,8 @@
             private var lastScrollAt: CFTimeInterval = 0
             private var suppressTapsUntil: CFTimeInterval = 0
 
-            /// finger points per wheel tick at 1× scroll speed (same as before)
-            private static let pointsPerTick: CGFloat = 6
+            /// finger points per wheel tick at 1× scroll speed (old value was 6: twice as fast now)
+            private static let pointsPerTick: CGFloat = 3
             private static let axisLockDistance: CGFloat = 6
             private static let axisLockRatio: CGFloat = 1.8
             /// finger speed (pt/s) needed at lift-off to keep scrolling
