@@ -69,11 +69,24 @@ struct TrackpadPanel: View {
         max(1, HIDInput.clamp(CGFloat(3 * scrollSensitivity)))
     }
 
+    /// iOS: a strip to slide on; macOS keeps the wheel up/down buttons
+    @ViewBuilder
     private var scrollColumn: some View {
-        VStack(spacing: cellGap) {
-            scrollButton("arrow.up", L10n.Mouse.wheelUp, scrollAmount)
-            scrollButton("arrow.down", L10n.Mouse.wheelDown, -scrollAmount)
-        }
+        #if os(iOS)
+            ZStack {
+                RoundedRectangle(cornerRadius: 12).fill(groupFill)
+                Image(systemName: "arrow.up.and.down")
+                    .font(.body)
+                    .foregroundColor(.secondary)
+                ScrollStripView(engine: engine, scrollSensitivity: scrollSensitivity, scrollInertia: scrollInertia)
+            }
+            .accessibilityLabel(L10n.Mouse.scrollStrip)
+        #else
+            VStack(spacing: cellGap) {
+                scrollButton("arrow.up", L10n.Mouse.wheelUp, scrollAmount)
+                scrollButton("arrow.down", L10n.Mouse.wheelDown, -scrollAmount)
+            }
+        #endif
     }
 
     private var mouseButtonsRow: some View {
@@ -111,25 +124,10 @@ struct TrackpadPanel: View {
         #endif
     }
 
-    /// on iOS holding an arrow keeps scrolling (and speeds up) instead of a single step
-    private func pressScroll(_ wheel: Int8) {
-        #if os(iOS)
-            engine.startHoldScroll(direction: wheel > 0 ? 1 : -1, rate: 20 * scrollSensitivity)
-        #else
-            hid.scroll(wheel)
-        #endif
-    }
-
-    private func releaseScroll() {
-        #if os(iOS)
-            engine.stopHoldScroll()
-        #endif
-    }
-
     private func scrollButton(_ icon: String, _ label: LocalizedStringKey, _ wheel: Int8) -> some View {
         HoldButton(
-            onPress: { pressScroll(wheel) },
-            onRelease: { releaseScroll() },
+            onPress: { hid.scroll(wheel) },
+            onRelease: {},
             background: { RoundedRectangle(cornerRadius: 12).fill(groupFill) },
             label: { Image(systemName: icon).font(.body) }
         )

@@ -425,6 +425,10 @@ extension L10n {
         static var wheelDown: LocalizedStringKey {
             "mouse.wheel.down"
         }
+
+        static var scrollStrip: LocalizedStringKey {
+            "mouse.scroll_strip"
+        }
     }
 
     enum Media {

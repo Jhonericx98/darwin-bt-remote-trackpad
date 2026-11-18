@@ -1035,6 +1035,17 @@
         }
       }
     },
+    "mouse.scroll_strip": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scroll strip"
+          }
+        }
+      }
+    },
     "remote.back": {
       "extractionState": "manual",
       "localizations": {

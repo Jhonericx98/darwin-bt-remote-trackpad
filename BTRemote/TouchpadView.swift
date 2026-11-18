@@ -98,11 +98,11 @@
             private var suppressTapsUntil: CFTimeInterval = 0
 
             /// finger points per wheel tick at 1× scroll speed (old value was 6: twice as fast now)
-            private static let pointsPerTick: CGFloat = 3
+            static let pointsPerTick: CGFloat = 3
             private static let axisLockDistance: CGFloat = 6
             private static let axisLockRatio: CGFloat = 1.8
             /// finger speed (pt/s) needed at lift-off to keep scrolling
-            private static let inertiaThreshold: CGFloat = 250
+            static let inertiaThreshold: CGFloat = 250
             /// lift-off must follow the last scroll movement within this time
             private static let inertiaWindow: CFTimeInterval = 0.1
 
@@ -233,7 +233,7 @@
             }
 
             /// progressive scroll acceleration for fast swipes, up to 3×
-            private static func scrollCurve(_ speed: CGFloat) -> CGFloat {
+            static func scrollCurve(_ speed: CGFloat) -> CGFloat {
                 min(3, 1 + max(0, speed - 500) / 700)
             }
 
@@ -252,6 +252,91 @@
                 shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
             ) -> Bool {
                 true
+            }
+        }
+    }
+
+    /// Side strip: a 1-finger vertical slide scrolls, with the same speed curve
+    /// and inertia as the 2-finger scroll on the touchpad.
+    struct ScrollStripView: UIViewRepresentable {
+        let engine: TouchpadEngine
+        var scrollSensitivity: CGFloat
+        var scrollInertia: Bool
+
+        func makeCoordinator() -> Coordinator {
+            Coordinator()
+        }
+
+        func makeUIView(context: Context) -> UIView {
+            let view = TouchSurfaceView()
+            view.backgroundColor = .clear
+            let c = context.coordinator
+            view.onTouchDown = { [weak c] in c?.touchDown() }
+            let pan = UIPanGestureRecognizer(target: c, action: #selector(Coordinator.handlePan(_:)))
+            pan.maximumNumberOfTouches = 1
+            view.addGestureRecognizer(pan)
+            return view
+        }
+
+        func updateUIView(_ uiView: UIView, context: Context) {
+            let c = context.coordinator
+            c.engine = engine
+            c.scrollSensitivity = scrollSensitivity
+            c.scrollInertia = scrollInertia
+        }
+
+        @MainActor
+        final class Coordinator: NSObject {
+            var engine: TouchpadEngine?
+            var scrollSensitivity: CGFloat = 1
+            var scrollInertia = true
+            /// smoothed finger velocity in points per second
+            private var velocity: CGFloat = 0
+            private var lastSampleAt: CFTimeInterval = 0
+
+            func touchDown() {
+                engine?.stopMomentum()
+            }
+
+            @objc func handlePan(_ pan: UIPanGestureRecognizer) {
+                guard let view = pan.view, let engine else { return }
+                let now = CACurrentMediaTime()
+                switch pan.state {
+                case .began:
+                    engine.touchBegan()
+                    velocity = pan.velocity(in: view).y
+                    lastSampleAt = now
+                    scroll(pan, in: view, now: now, sampleVelocity: false)
+                case .changed:
+                    scroll(pan, in: view, now: now, sampleVelocity: true)
+                case .ended, .cancelled, .failed:
+                    let speed = abs(velocity)
+                    if scrollInertia, pan.state == .ended, now - lastSampleAt < 0.1,
+                       speed >= TouchpadView.Coordinator.inertiaThreshold
+                    {
+                        engine.startMomentum(CGVector(dx: 0, dy: -velocity * ticksPerPoint(speed)))
+                    }
+                    engine.touchEnded()
+                default:
+                    break
+                }
+            }
+
+            private func scroll(_ pan: UIPanGestureRecognizer, in view: UIView, now: CFTimeInterval, sampleVelocity: Bool) {
+                let t = pan.translation(in: view).y
+                pan.setTranslation(.zero, in: view)
+                if sampleVelocity {
+                    let dt = max(now - lastSampleAt, 1.0 / 240)
+                    velocity = velocity * 0.6 + t / dt * 0.4
+                }
+                lastSampleAt = now
+                // finger up scrolls the same way as the 2-finger gesture
+                engine?.addScroll(CGVector(dx: 0, dy: -t * ticksPerPoint(abs(velocity))))
+            }
+
+            private func ticksPerPoint(_ speed: CGFloat) -> CGFloat {
+                TouchpadView.Coordinator.scrollCurve(speed) * max(scrollSensitivity, 0.1)
+                    / TouchpadView.Coordinator.pointsPerTick
             }
         }
     }
@@ -292,9 +377,6 @@
         /// ticks per second
         private var momentum = CGVector.zero
         private var isTouching = false
-        /// arrow-button scrolling while held, ticks per second (+ scrolls up)
-        private var holdScroll: CGFloat = 0
-        private var holdStartedAt: CFTimeInterval = 0
         private var needsRestReport = false
         private var lastReportAt: CFTimeInterval = 0
         private var lastTick: CFTimeInterval = 0
@@ -358,19 +440,6 @@
             return wasCoasting
         }
 
-        /// first step at once, then continuous scrolling that speeds up to 3× over ~1 s
-        func startHoldScroll(direction: CGFloat, rate: CGFloat) {
-            holdScroll = direction * rate
-            holdStartedAt = CACurrentMediaTime()
-            pendingScroll.dy += direction
-            run()
-        }
-
-        func stopHoldScroll() {
-            holdScroll = 0
-            run()
-        }
-
         func press(_ button: MouseButtons) {
             heldButtons.insert(button)
             emit(force: true)
@@ -407,11 +476,6 @@
                 if hypot(momentum.dx, momentum.dy) < Self.minMomentum { momentum = .zero }
             }
 
-            if holdScroll != 0 {
-                let ramp = min(3, 1 + (now - holdStartedAt) / 0.5)
-                pendingScroll.dy += holdScroll * ramp * dt
-            }
-
             if !clickButton.isEmpty, now >= clickReleaseAt {
                 clickButton = []
                 emit(force: true)
@@ -419,7 +483,7 @@
                 emit(force: false)
             }
 
-            if needsRestReport, !isTouching, holdScroll == 0, momentum == .zero, now - lastReportAt >= Self.restDelay {
+            if needsRestReport, !isTouching, momentum == .zero, now - lastReportAt >= Self.restDelay {
                 // relative axes need no zero report; this one only refreshes the
                 // peripheral's cached report so a reconnect does not replay motion
                 output(MouseReport(buttons: heldButtons))
@@ -427,7 +491,7 @@
             }
 
             let scrollDrained = abs(pendingScroll.dx) < 1 && abs(pendingScroll.dy) < 1
-            if !isTouching, holdScroll == 0, momentum == .zero, clickButton.isEmpty, !needsRestReport, scrollDrained {
+            if !isTouching, momentum == .zero, clickButton.isEmpty, !needsRestReport, scrollDrained {
                 pendingPointer = .zero
                 pendingScroll = .zero
                 link.isPaused = true
