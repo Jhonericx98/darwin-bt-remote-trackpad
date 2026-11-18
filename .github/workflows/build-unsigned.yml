@@ -1,0 +1,65 @@
+name: Build unsigned iOS IPA
+
+# Builds an unsigned .ipa to sideload (e.g. with Sideloadly) on a personal device.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  ios:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          XCODE=/Applications/Xcode_26.3.app
+          [ -d "$XCODE" ] || XCODE="$(ls -d /Applications/Xcode_*.app | grep -vi beta | sort -V | tail -1)"
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+
+      - name: Generate project
+        env:
+          CI_PRIMARY_REPOSITORY_PATH: ${{ github.workspace }}
+        run: bash ci_scripts/ci_post_clone.sh
+
+      - name: Lint (informative)
+        continue-on-error: true
+        run: |
+          which swiftlint || brew install swiftlint
+          swiftlint lint BTRemote/TouchpadView.swift BTRemote/TrackpadPanel.swift BTRemote/SettingsView.swift
+
+      - name: Build
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project BTRemote.xcodeproj \
+            -scheme BTRemote \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath .build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee build.log | grep -E "error:|warning: .*(TouchpadView|TrackpadPanel|SettingsView|HIDReports|Combo)|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" build.log
+
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          cp -R .build/DerivedData/Build/Products/Release-iphoneos/BTRemote.app Payload/
+          zip -qry BTRemote-trackpad-unsigned.ipa Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: BTRemote-trackpad-unsigned
+          path: BTRemote-trackpad-unsigned.ipa
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
